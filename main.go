@@ -122,8 +122,22 @@ func main() {
 				claim = (claim / perClaim) * 100.0
 			}
 
-			if ref != (WikidataReference{}) {
-				var citeRef string
+			var citeRef string
+			if ref == (WikidataReference{}) {
+				var builder strings.Builder
+				builder.WriteString("<ref>Sourced from [[:wikidata:")
+				entity, _ := dataKeys.GetString(dataProp) // this must exist, as we've already checked it above
+				builder.WriteString(entity)
+				builder.WriteString("]]")
+				if usePer {
+					builder.WriteString(" and [[:wikidata:")
+					perEntity, _ := dataKeys.GetString(perProp) // same rationale here
+					builder.WriteString(perEntity)
+					builder.WriteString("]]")
+				}
+				builder.WriteString(", but no source was given on Wikidata. Please update Wikidata with a valid source.</ref>")
+				citeRef = builder.String()
+			} else {
 				ref.loadURLCitation()
 				citeRef = "<ref>"
 
@@ -133,20 +147,20 @@ func main() {
 						perRef.loadURLCitation()
 						citeRef = citeRef + perRef.refToCiteWeb()
 					} else {
-						citeRef = citeRef + "an unknown source"
+						citeRef = citeRef + "an unknown source (see Wikidata)"
 					}
 				} else {
 					citeRef = citeRef + ref.refToCiteWeb()
 				}
 
 				citeRef = citeRef + ".</ref>"
+			}
 
-				refslotRegex, err := regexp.Compile(`(?i)<!-- *REFSLOT:` + regexp.QuoteMeta(match[1]) + `:` + regexp.QuoteMeta(match[2]) + ` *-->`)
-				if err == nil {
-					templateText = refslotRegex.ReplaceAllString(templateText, citeRef)
-				} else {
-					logFailureMessage("compiling refslotRegex", config, err)
-				}
+			refslotRegex, err := regexp.Compile(`(?i)<!-- *REFSLOT:` + regexp.QuoteMeta(match[1]) + `:` + regexp.QuoteMeta(match[2]) + ` *-->`)
+			if err == nil {
+				templateText = refslotRegex.ReplaceAllString(templateText, citeRef)
+			} else {
+				logFailureMessage("compiling refslotRegex", config, err)
 			}
 
 			// format to 1dp
