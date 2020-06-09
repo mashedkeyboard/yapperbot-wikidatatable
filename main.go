@@ -124,31 +124,22 @@ func main() {
 
 			if ref != (WikidataReference{}) {
 				var citeRef string
-				if strings.Contains(ref.URL, "indiastat.com") {
-					citeRef = "<ref>Wikidata referenced to indiastat, an unreliable source</ref>{{Unreliable source?}}"
-				} else {
-					ref.loadURLCitation()
-					citeRef = "<ref>"
+				ref.loadURLCitation()
+				citeRef = "<ref>"
 
-					if usePer {
-						citeRef = citeRef + "Calculated from " + ref.refToCiteWeb() + " and "
-						if perRef != (WikidataReference{}) {
-							// this should be changed at Wikidata
-							if strings.Contains(perRef.URL, "indiastat.com") {
-								citeRef = "indiastat, an unreliable source"
-							} else {
-								perRef.loadURLCitation()
-								citeRef = citeRef + perRef.refToCiteWeb()
-							}
-						} else {
-							citeRef = citeRef + "an unknown source"
-						}
+				if usePer {
+					citeRef = citeRef + "Calculated from " + ref.refToCiteWeb() + " and "
+					if perRef != (WikidataReference{}) {
+						perRef.loadURLCitation()
+						citeRef = citeRef + perRef.refToCiteWeb()
 					} else {
-						citeRef = citeRef + ref.refToCiteWeb()
+						citeRef = citeRef + "an unknown source"
 					}
-
-					citeRef = citeRef + "</ref>"
+				} else {
+					citeRef = citeRef + ref.refToCiteWeb()
 				}
+
+				citeRef = citeRef + ".</ref>"
 
 				refslotRegex, err := regexp.Compile(`(?i)<!-- *REFSLOT:` + regexp.QuoteMeta(match[1]) + `:` + regexp.QuoteMeta(match[2]) + ` *-->`)
 				if err == nil {

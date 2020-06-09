@@ -112,10 +112,22 @@ func fetchWikidata(entityID string) (entity WikidataEntity, err error) {
 }
 
 func parseDateIfAppropriate(date string, err error) string {
-	if err == nil {
-		parsedDate, err := time.Parse("+2006-01-02T15:04:05Z", date)
+	var parsedDate time.Time
+	if err == nil && date != "" {
+		parsedDate, err = time.Parse("+2006-01-02T15:04:05Z", date)
 		if err == nil {
 			return parsedDate.Format("2006-01-02")
+		}
+
+		// Try both month and year-only accuracy, in case it's just that it's not accurate enough
+		// this doesn't work by just leaving it, because 00 is not a valid month or day
+		parsedDate, err = time.Parse("+2006-01-00T00:00:00Z", date)
+		if err == nil {
+			return parsedDate.Format("January 2006")
+		}
+		parsedDate, err = time.Parse("+2006-00-00T00:00:00Z", date)
+		if err == nil {
+			return parsedDate.Format("2006")
 		}
 	}
 	return ""
@@ -164,7 +176,7 @@ func (r WikidataReference) refToCiteWeb() string {
 		}
 		return builder.String()
 	}
-	return "{{cite web|url=" + r.URL + "|title=" + citeClean(r.Title) + "|date=" + r.Published +
+	return "{{cite web|postscript=none|url=" + r.URL + "|title=" + citeClean(r.Title) + "|date=" + r.Published +
 		"|access-date=" + r.Retrieved + "|language=" + r.Lang + "|website=" + citeClean(r.Website) + "}}"
 }
 
