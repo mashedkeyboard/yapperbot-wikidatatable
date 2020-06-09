@@ -20,7 +20,10 @@ package main
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/antonholmquist/jason"
 )
@@ -32,10 +35,23 @@ type WikidataEntity struct {
 	object *jason.Object
 }
 
-var cachedWikidata map[string]WikidataEntity
+// WikidataReference is a struct representing a reference for a Wikidata claim.
+type WikidataReference struct {
+	Found     bool
+	URL       string
+	Retrieved string
+	Published string
+	Title     string
+	Lang      string
+	Website   string
+}
+
+var cachedWikidata = map[string]WikidataEntity{}
+var cachedCitationResults = map[string][]string{}
 
 // GetFloatClaim takes a claimID and fetches the claim from the entity.
-func (e WikidataEntity) GetFloatClaim(claimID string) (result float64, err error) {
+func (e WikidataEntity) GetFloatClaim(claimID string) (result float64, reference WikidataReference, err error) {
+	reference = WikidataReference{}
 	matchingClaims, err := e.object.GetObjectArray("entities", e.id, "claims", claimID)
 	if err != nil {
 		return
@@ -45,7 +61,34 @@ func (e WikidataEntity) GetFloatClaim(claimID string) (result float64, err error
 	if err != nil {
 		return
 	}
-	return strconv.ParseFloat(amount, 64)
+
+	refDetails, err := matchingClaims[len(matchingClaims)-1].GetObjectArray("references")
+	if err == nil {
+		lastRef, err := refDetails[len(refDetails)-1].GetObject("snaks")
+		if err == nil {
+			url, err := fetchSingularProp(lastRef, "P854").GetString("datavalue", "value")
+			if err == nil {
+				reference.Found = true
+				reference.URL = url
+				retrieved := parseDateIfAppropriate(fetchSingularProp(lastRef, "P813").GetString("datavalue", "value", "time"))
+				if retrieved != "" {
+					reference.Retrieved = retrieved
+				}
+				published := parseDateIfAppropriate(fetchSingularProp(lastRef, "P577").GetString("datavalue", "value", "time"))
+				if published == "" {
+					quals, err := matchingClaims[len(matchingClaims)-1].GetObject("qualifiers")
+					if err == nil {
+						reference.Retrieved = parseDateIfAppropriate(fetchSingularProp(quals, "P585").GetString("datavalue", "value", "time"))
+					}
+				} else {
+					reference.Published = published
+				}
+			}
+		}
+	}
+
+	result, err = strconv.ParseFloat(amount, 64)
+	return
 }
 
 // fetchWikidata takes a wikidata entityID and returns a WikidataEntity object,
@@ -64,5 +107,82 @@ func fetchWikidata(entityID string) (entity WikidataEntity, err error) {
 	}
 	entity.id = entityID
 	entity.object = v
+	cachedWikidata[entityID] = entity
 	return
+}
+
+func parseDateIfAppropriate(date string, err error) string {
+	if err == nil {
+		parsedDate, err := time.Parse("+2006-01-02T15:04:05Z", date)
+		if err == nil {
+			return parsedDate.Format("2006-01-02")
+		}
+	}
+	return ""
+}
+
+func (r *WikidataReference) loadURLCitation() {
+	if result, ok := cachedCitationResults[r.URL]; ok {
+		r.Title = result[0]
+		r.Lang = result[1]
+		r.Website = result[2]
+	} else {
+		resp, err := http.Get("https://en.wikipedia.org/api/rest_v1/data/citation/mediawiki/" + url.PathEscape(r.URL) + "?action=query&format=json")
+		if err == nil {
+			v, err := jason.NewValueFromReader(resp.Body)
+			if err == nil {
+				results, err := v.ObjectArray()
+				if err == nil {
+					title, err := results[0].GetString("title")
+					if err == nil {
+						r.Title = title
+					}
+					lang, err := results[0].GetString("language")
+					if err == nil {
+						r.Lang = lang
+					}
+					site, err := results[0].GetString("websiteTitle")
+					if err == nil {
+						r.Website = site
+					}
+				}
+			}
+		}
+		cachedCitationResults[r.URL] = []string{r.Title, r.Lang, r.Website}
+	}
+}
+
+func (r WikidataReference) refToCiteWeb() string {
+	if r.Title == "" || titleIsURL(r.Title) {
+		return "[" + r.URL + "]"
+	}
+	return "{{cite web|url=" + r.URL + "|title=" + citeClean(r.Title) + "|date=" + r.Published +
+		"|access-date=" + r.Retrieved + "|language=" + r.Lang + "|website=" + citeClean(r.Website) + "}}"
+}
+
+func fetchSingularProp(obj *jason.Object, propID string) *jason.Object {
+	arr, err := obj.GetObjectArray(propID)
+	if err != nil {
+		return &jason.Object{}
+	}
+	return arr[0]
+}
+
+func titleIsURL(s string) bool {
+	_, err := url.ParseRequestURI(s)
+	return (err == nil)
+}
+
+// see https://en.wikipedia.org/wiki/Help:CS1_errors#invisible_char
+var charsToClean = []string{
+	"\u00A0", "\u00AD", "\uFFFD", "\u200A",
+	"\u200B", "\u200D", "\u0009", "\u0010",
+	"\u0013", "\u007F"}
+
+func citeClean(s string) string {
+	working := strings.ReplaceAll(s, "|", "{{!}}")
+	for _, check := range charsToClean {
+		working = strings.ReplaceAll(working, check, "")
+	}
+	return working
 }

@@ -70,11 +70,12 @@ func main() {
 		}
 
 		templatesDone := map[string]bool{}
+		failedKeys := map[string]bool{}
 
 		for _, match := range dataslotRegex.FindAllStringSubmatch(templateText, -1) {
 			// don't process a template (heading + lookup) more than once,
 			// even if it appears on the page more than once - we replace them all
-			if templatesDone[match[0]] {
+			if templatesDone[match[0]] || failedKeys[match[2]] {
 				continue
 			} else {
 				templatesDone[match[0]] = true
@@ -89,6 +90,7 @@ func main() {
 			dataKeys, err := data.GetObject(match[2])
 			if err != nil {
 				logFailureMessage("data key "+match[2], config, err)
+				failedKeys[match[2]] = true
 				continue
 			}
 
@@ -104,17 +106,56 @@ func main() {
 				usePer = false
 			}
 
-			claim, err := loadEntityAndClaimFromJSON(dataKeys, dataProp)
+			claim, ref, err := loadEntityAndClaimFromJSON(dataKeys, dataProp)
 			if err != nil {
 				logFailureMessage("loadEntityAndClaimFromJSON for "+dataProp+" in "+match[1], config, err)
 			}
 
+			var perClaim float64
+			var perRef WikidataReference
 			if usePer {
-				perClaim, err := loadEntityAndClaimFromJSON(dataKeys, perProp)
+				perClaim, perRef, err = loadEntityAndClaimFromJSON(dataKeys, perProp)
 				if err != nil {
 					logFailureMessage("loadEntityAndClaimFromJSON for perProp "+perProp+" in "+match[1], config, err)
+					continue
 				}
 				claim = (claim / perClaim) * 100.0
+			}
+
+			if ref != (WikidataReference{}) {
+				var citeRef string
+				if strings.Contains(ref.URL, "indiastat.com") {
+					citeRef = "<ref>Wikidata referenced to indiastat, an unreliable source</ref>{{Unreliable source?}}"
+				} else {
+					ref.loadURLCitation()
+					citeRef = "<ref>"
+
+					if usePer {
+						citeRef = citeRef + "Calculated from " + ref.refToCiteWeb() + " and "
+						if perRef != (WikidataReference{}) {
+							// this should be changed at Wikidata
+							if strings.Contains(perRef.URL, "indiastat.com") {
+								citeRef = "indiastat, an unreliable source"
+							} else {
+								perRef.loadURLCitation()
+								citeRef = citeRef + perRef.refToCiteWeb()
+							}
+						} else {
+							citeRef = citeRef + "an unknown source"
+						}
+					} else {
+						citeRef = citeRef + ref.refToCiteWeb()
+					}
+
+					citeRef = citeRef + "</ref>"
+				}
+
+				refslotRegex, err := regexp.Compile(`(?i)<!-- *REFSLOT:` + regexp.QuoteMeta(match[1]) + `:` + regexp.QuoteMeta(match[2]) + ` *-->`)
+				if err == nil {
+					templateText = refslotRegex.ReplaceAllString(templateText, citeRef)
+				} else {
+					logFailureMessage("compiling refslotRegex", config, err)
+				}
 			}
 
 			// format to 1dp
@@ -134,19 +175,19 @@ func main() {
 	}
 }
 
-func loadEntityAndClaimFromJSON(dataKeys *jason.Object, dataProp string) (claim float64, err error) {
+func loadEntityAndClaimFromJSON(dataKeys *jason.Object, dataProp string) (result float64, ref WikidataReference, err error) {
 	entityForProp, err := dataKeys.GetString(dataProp)
 	if err != nil {
 		return
 	}
 
-	return fetchEntityAndClaim(entityForProp, dataProp)
+	return fetchEntityAndClaimWithRef(entityForProp, dataProp)
 }
 
-func fetchEntityAndClaim(entityID string, claimID string) (float64, error) {
+func fetchEntityAndClaimWithRef(entityID string, claimID string) (float64, WikidataReference, error) {
 	entity, err := fetchWikidata(entityID)
 	if err != nil {
-		return 0, err
+		return 0, WikidataReference{}, err
 	}
 
 	return entity.GetFloatClaim(claimID)
