@@ -154,7 +154,15 @@ func (r *WikidataReference) loadURLCitation() {
 
 func (r WikidataReference) refToCiteWeb() string {
 	if r.Title == "" || titleIsURL(r.Title) {
-		return "[" + r.URL + "]"
+		var builder strings.Builder
+		builder.WriteString("[" + r.URL + "]")
+		if r.Published != "" {
+			writeDateToBuilder(&builder, r.Published, "published")
+		}
+		if r.Retrieved != "" {
+			writeDateToBuilder(&builder, r.Retrieved, "retrieved")
+		}
+		return builder.String()
 	}
 	return "{{cite web|url=" + r.URL + "|title=" + citeClean(r.Title) + "|date=" + r.Published +
 		"|access-date=" + r.Retrieved + "|language=" + r.Lang + "|website=" + citeClean(r.Website) + "}}"
@@ -185,4 +193,12 @@ func citeClean(s string) string {
 		working = strings.ReplaceAll(working, check, "")
 	}
 	return working
+}
+
+func writeDateToBuilder(builder *strings.Builder, date string, dateType string) {
+	builder.WriteString(" (")
+	builder.WriteString(dateType)
+	builder.WriteString(" {{date|")
+	builder.WriteString(date)
+	builder.WriteString("}})")
 }
