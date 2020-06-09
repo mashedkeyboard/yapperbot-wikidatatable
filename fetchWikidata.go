@@ -78,7 +78,7 @@ func (e WikidataEntity) GetFloatClaim(claimID string) (result float64, reference
 				if published == "" {
 					quals, err := matchingClaims[len(matchingClaims)-1].GetObject("qualifiers")
 					if err == nil {
-						reference.Retrieved = parseDateIfAppropriate(fetchSingularProp(quals, "P585").GetString("datavalue", "value", "time"))
+						reference.Published = parseDateIfAppropriate(fetchSingularProp(quals, "P585").GetString("datavalue", "value", "time"))
 					}
 				} else {
 					reference.Published = published
