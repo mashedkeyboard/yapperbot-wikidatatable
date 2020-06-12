@@ -19,6 +19,7 @@ package main
 //
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -26,14 +27,8 @@ import (
 	"time"
 
 	"github.com/antonholmquist/jason"
+	"github.com/knakk/rdf"
 )
-
-// WikidataEntity is a struct representing... an entity on Wikidata.
-// Its fields are private, and it should only have its methods used.
-type WikidataEntity struct {
-	id     string
-	object *jason.Object
-}
 
 // WikidataReference is a struct representing a reference for a Wikidata claim.
 type WikidataReference struct {
@@ -46,44 +41,48 @@ type WikidataReference struct {
 	Website   string
 }
 
-var cachedWikidata = map[string]WikidataEntity{}
 var cachedCitationResults = map[string][]string{}
 
-// GetFloatClaim takes a claimID and fetches the claim from the entity.
-func (e WikidataEntity) GetFloatClaim(claimID string) (result float64, reference WikidataReference, err error) {
-	reference = WikidataReference{}
-	matchingClaims, err := e.object.GetObjectArray("entities", e.id, "claims", claimID)
-	if err != nil {
-		return
-	}
-	// get the last claim and parse its mainsnak value as an int
-	amount, err := matchingClaims[len(matchingClaims)-1].GetString("mainsnak", "datavalue", "value", "amount")
+// GetFloatClaimAndReference takes a claimID and fetches the claim from the entity,
+// along with a reference if one is available.
+func GetFloatClaimAndReference(entityID, claimID string) (result float64, reference WikidataReference, err error) {
+	res, err := sparqlRepo.Query(generateQueryFor(entityID, claimID))
 	if err != nil {
 		return
 	}
 
-	refDetails, err := matchingClaims[len(matchingClaims)-1].GetObjectArray("references")
-	if err == nil {
-		lastRef, err := refDetails[len(refDetails)-1].GetObject("snaks")
-		if err == nil {
-			url, err := fetchSingularProp(lastRef, "P854").GetString("datavalue", "value")
-			if err == nil {
-				reference.Found = true
-				reference.URL = url
-				retrieved := parseDateIfAppropriate(fetchSingularProp(lastRef, "P813").GetString("datavalue", "value", "time"))
-				if retrieved != "" {
-					reference.Retrieved = retrieved
-				}
-				published := parseDateIfAppropriate(fetchSingularProp(lastRef, "P577").GetString("datavalue", "value", "time"))
-				if published == "" {
-					quals, err := matchingClaims[len(matchingClaims)-1].GetObject("qualifiers")
-					if err == nil {
-						reference.Published = parseDateIfAppropriate(fetchSingularProp(quals, "P585").GetString("datavalue", "value", "time"))
-					}
-				} else {
-					reference.Published = published
-				}
-			}
+	reference = WikidataReference{}
+
+	var solution map[string]rdf.Term
+
+	if len(res.Solutions()) < 1 {
+		err = fmt.Errorf("no solutions found for given parameters")
+		return
+	}
+
+	solution = res.Solutions()[0]
+	amount := solution["val"].String()
+
+	if refLabel, ok := solution["refLabel"]; ok {
+		reference.Found = true
+		reference.Title = refLabel.String()
+	}
+
+	if refURL, ok := solution["url"]; ok {
+		reference.Found = true
+		reference.URL = refURL.String()
+	}
+
+	if reference.Found {
+		retrieved := parseDateIfAppropriate(solution, "retrieved")
+		if retrieved != "" {
+			reference.Retrieved = retrieved
+		}
+		published := parseDateIfAppropriate(solution, "published")
+		if published == "" {
+			reference.Published = parseDateIfAppropriate(solution, "pointintime")
+		} else {
+			reference.Published = published
 		}
 	}
 
@@ -91,43 +90,28 @@ func (e WikidataEntity) GetFloatClaim(claimID string) (result float64, reference
 	return
 }
 
-// fetchWikidata takes a wikidata entityID and returns a WikidataEntity object,
-// caching the data locally
-func fetchWikidata(entityID string) (entity WikidataEntity, err error) {
-	if cachedWikidata[entityID] != (WikidataEntity{}) {
-		return cachedWikidata[entityID], nil
-	}
-	resp, err := http.Get("https://www.wikidata.org/wiki/Special:EntityData/" + entityID + ".json")
-	if err != nil {
-		return
-	}
-	v, err := jason.NewObjectFromReader(resp.Body)
-	if err != nil {
-		return
-	}
-	entity.id = entityID
-	entity.object = v
-	cachedWikidata[entityID] = entity
-	return
-}
+func parseDateIfAppropriate(term map[string]rdf.Term, field string) string {
+	if dateField, ok := term[field]; ok {
+		var parsedDate time.Time
+		var err error
+		var date string = dateField.String()
 
-func parseDateIfAppropriate(date string, err error) string {
-	var parsedDate time.Time
-	if err == nil && date != "" {
-		parsedDate, err = time.Parse("+2006-01-02T15:04:05Z", date)
-		if err == nil {
-			return parsedDate.Format("2006-01-02")
-		}
+		if date != "" {
+			parsedDate, err = time.Parse("+2006-01-02T15:04:05Z", date)
+			if err == nil {
+				return parsedDate.Format("2006-01-02")
+			}
 
-		// Try both month and year-only accuracy, in case it's just that it's not accurate enough
-		// this doesn't work by just leaving it, because 00 is not a valid month or day
-		parsedDate, err = time.Parse("+2006-01-00T00:00:00Z", date)
-		if err == nil {
-			return parsedDate.Format("January 2006")
-		}
-		parsedDate, err = time.Parse("+2006-00-00T00:00:00Z", date)
-		if err == nil {
-			return parsedDate.Format("2006")
+			// Try both month and year-only accuracy, in case it's just that it's not accurate enough
+			// this doesn't work by just leaving it, because 00 is not a valid month or day
+			parsedDate, err = time.Parse("+2006-01-00T00:00:00Z", date)
+			if err == nil {
+				return parsedDate.Format("January 2006")
+			}
+			parsedDate, err = time.Parse("+2006-00-00T00:00:00Z", date)
+			if err == nil {
+				return parsedDate.Format("2006")
+			}
 		}
 	}
 	return ""
@@ -146,7 +130,7 @@ func (r *WikidataReference) loadURLCitation() {
 				results, err := v.ObjectArray()
 				if err == nil {
 					title, err := results[0].GetString("title")
-					if err == nil {
+					if err == nil && r.Title == "" {
 						r.Title = title
 					}
 					lang, err := results[0].GetString("language")
@@ -165,15 +149,16 @@ func (r *WikidataReference) loadURLCitation() {
 }
 
 func (r WikidataReference) refToCiteWeb() string {
+	var builder strings.Builder
+	if r.URL == "" {
+		builder.WriteString(r.Title)
+		writeDatesToBuilderWhereNeeded(&builder, r)
+		return builder.String()
+	}
+	r.loadURLCitation()
 	if r.Title == "" || titleIsURL(r.Title) {
-		var builder strings.Builder
 		builder.WriteString("[" + r.URL + "]")
-		if r.Published != "" {
-			writeDateToBuilder(&builder, r.Published, "published")
-		}
-		if r.Retrieved != "" {
-			writeDateToBuilder(&builder, r.Retrieved, "retrieved")
-		}
+		writeDatesToBuilderWhereNeeded(&builder, r)
 		return builder.String()
 	}
 	return "{{cite web|postscript=none|url=" + r.URL + "|title=" + citeClean(r.Title) + "|date=" + r.Published +
@@ -205,6 +190,15 @@ func citeClean(s string) string {
 		working = strings.ReplaceAll(working, check, "")
 	}
 	return working
+}
+
+func writeDatesToBuilderWhereNeeded(builder *strings.Builder, r WikidataReference) {
+	if r.Published != "" {
+		writeDateToBuilder(builder, r.Published, "published")
+	}
+	if r.Retrieved != "" {
+		writeDateToBuilder(builder, r.Retrieved, "retrieved")
+	}
 }
 
 func writeDateToBuilder(builder *strings.Builder, date string, dateType string) {

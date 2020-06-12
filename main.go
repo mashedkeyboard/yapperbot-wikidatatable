@@ -106,17 +106,18 @@ func main() {
 				usePer = false
 			}
 
-			claim, ref, err := loadEntityAndClaimFromJSON(dataKeys, dataProp)
+			claim, ref, err := loadEntityAndClaim(dataKeys, dataProp)
 			if err != nil {
-				logFailureMessage("loadEntityAndClaimFromJSON for "+dataProp+" in "+match[1], config, err)
+				logFailureMessage("loadEntityAndClaim for "+dataProp+" in "+match[1], config, err)
+				continue
 			}
 
 			var perClaim float64
 			var perRef WikidataReference
 			if usePer {
-				perClaim, perRef, err = loadEntityAndClaimFromJSON(dataKeys, perProp)
+				perClaim, perRef, err = loadEntityAndClaim(dataKeys, perProp)
 				if err != nil {
-					logFailureMessage("loadEntityAndClaimFromJSON for perProp "+perProp+" in "+match[1], config, err)
+					logFailureMessage("loadEntityAndClaim for perProp "+perProp+" in "+match[1], config, err)
 					continue
 				}
 				claim = (claim / perClaim) * 100.0
@@ -138,13 +139,11 @@ func main() {
 				builder.WriteString(", but no source was given on Wikidata. Please update Wikidata with a valid source.</ref>")
 				citeRef = builder.String()
 			} else {
-				ref.loadURLCitation()
 				citeRef = "<ref>"
 
 				if usePer {
 					citeRef = citeRef + "Calculated from " + ref.refToCiteWeb() + " and "
 					if perRef != (WikidataReference{}) {
-						perRef.loadURLCitation()
 						citeRef = citeRef + perRef.refToCiteWeb()
 					} else {
 						citeRef = citeRef + "an unknown source (see Wikidata)"
@@ -180,22 +179,13 @@ func main() {
 	}
 }
 
-func loadEntityAndClaimFromJSON(dataKeys *jason.Object, dataProp string) (result float64, ref WikidataReference, err error) {
+func loadEntityAndClaim(dataKeys *jason.Object, dataProp string) (result float64, ref WikidataReference, err error) {
 	entityForProp, err := dataKeys.GetString(dataProp)
 	if err != nil {
 		return
 	}
 
-	return fetchEntityAndClaimWithRef(entityForProp, dataProp)
-}
-
-func fetchEntityAndClaimWithRef(entityID string, claimID string) (float64, WikidataReference, error) {
-	entity, err := fetchWikidata(entityID)
-	if err != nil {
-		return 0, WikidataReference{}, err
-	}
-
-	return entity.GetFloatClaim(claimID)
+	return GetFloatClaimAndReference(entityForProp, dataProp)
 }
 
 func logFailureMessage(thing string, config string, err error) {
