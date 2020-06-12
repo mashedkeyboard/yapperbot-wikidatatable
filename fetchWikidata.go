@@ -27,7 +27,9 @@ import (
 	"time"
 
 	"github.com/antonholmquist/jason"
+	"github.com/avast/retry-go"
 	"github.com/knakk/rdf"
+	"github.com/knakk/sparql"
 )
 
 // WikidataReference is a struct representing a reference for a Wikidata claim.
@@ -46,7 +48,14 @@ var cachedCitationResults = map[string][]string{}
 // GetFloatClaimAndReference takes a claimID and fetches the claim from the entity,
 // along with a reference if one is available.
 func GetFloatClaimAndReference(entityID, claimID string) (result float64, reference WikidataReference, err error) {
-	res, err := sparqlRepo.Query(generateQueryFor(entityID, claimID))
+	var res *sparql.Results
+	retry.Do(
+		func() error {
+			res, err = sparqlRepo.Query(generateQueryFor(entityID, claimID))
+			return err
+		},
+		retry.Attempts(3),
+	)
 	if err != nil {
 		return
 	}
