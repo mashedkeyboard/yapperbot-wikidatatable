@@ -48,7 +48,7 @@ SELECT ?val ?pointintime ?refLabel ?url ?retrieved ?published ?rank WHERE {
   }
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }
-ORDER BY DESC(?rank) DESC(?pointintime) DESC(?published) DESC(?retrieved) DESC(?url) DESC(?refLabel) LIMIT 1
+ORDER BY DESC(?rank) DESC(?pointintime) DESC(?url) DESC(?refLabel) DESC(?published) DESC(?retrieved) LIMIT 1
 `
 
 var queryBank sparql.Bank
