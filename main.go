@@ -120,7 +120,7 @@ func main() {
 					logFailureMessage("loadEntityAndClaim for perProp "+perProp+" in "+match[1], config, err)
 					continue
 				}
-				claim = (claim / perClaim) * 100.0
+				claim = claim / perClaim
 			}
 
 			var citeRef string
